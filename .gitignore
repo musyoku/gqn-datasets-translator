@@ -1,0 +1,12 @@
+# ignore all
+*
+
+# allow any
+!*/
+!*.py
+!*.md
+!.gitignore
+
+# ignore
+.vscode
+build
