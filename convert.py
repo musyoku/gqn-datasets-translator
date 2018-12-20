@@ -139,9 +139,6 @@ def extract(output_directory, filenames, dataset_info, chunk_index):
     except:
         pass
 
-    current = multiprocessing.current_process()
-    thread_id = current._identity[0]
-
     frames_array = []
     viewpoints_array = []
     for file_index, tfrecord_filename in enumerate(filenames):
@@ -154,9 +151,6 @@ def extract(output_directory, filenames, dataset_info, chunk_index):
 
             frames_array.append(frames)
             viewpoints_array.append(viewpoints)
-
-        if thread_id == 1:
-            print(file_index, "/", len(filenames), "done")
 
     frames_array = np.vstack(frames_array)
     viewpoints_array = np.vstack(viewpoints_array)
@@ -189,6 +183,7 @@ def main():
     ## train
     filename_array = get_dataset_filenames(dataset_info, "train",
                                            args.source_dataset_directory)
+    print(len(filename_array))
     filename_array_chunk = list(chunked(filename_array, args.num_threads))
 
     arguments = []
