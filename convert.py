@@ -9,6 +9,7 @@ import gzip
 import os
 import sys
 import time
+import multiprocessing
 from multiprocessing import Pool
 from more_itertools import chunked
 
@@ -138,10 +139,13 @@ def extract(output_directory, filenames, dataset_info, chunk_index):
     except:
         pass
 
+    current = multiprocessing.current_process()
+    thread_id = current._identity[0]
+
     frames_array = []
     viewpoints_array = []
-    for tfrecord_filepath in filenames:
-        engine = tf.python_io.tf_record_iterator(tfrecord_filepath)
+    for file_index, tfrecord_filename in enumerate(filenames):
+        engine = tf.python_io.tf_record_iterator(tfrecord_filename)
         for raw_data in engine:
             frames, viewpoints = convert_raw_to_numpy(dataset_info, raw_data)
 
@@ -151,9 +155,13 @@ def extract(output_directory, filenames, dataset_info, chunk_index):
             frames_array.append(frames)
             viewpoints_array.append(viewpoints)
 
-        frames_array = np.vstack(frames_array)
-        viewpoints_array = np.vstack(viewpoints_array)
 
+        if thread_id == 1:
+            print(file_index, "/", len(filenames), "done")
+
+    frames_array = np.vstack(frames_array)
+    viewpoints_array = np.vstack(viewpoints_array)
+    
     filename = "{}.npy".format(chunk_index)
     np.save(os.path.join(output_directory, "images", filename), frames_array)
     np.save(
