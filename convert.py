@@ -141,7 +141,7 @@ def extract(output_directory, filenames, dataset_info, chunk_index):
 
     frames_array = []
     viewpoints_array = []
-    for file_index, tfrecord_filename in enumerate(filenames):
+    for tfrecord_filename in filenames:
         engine = tf.python_io.tf_record_iterator(tfrecord_filename)
         for raw_data in engine:
             frames, viewpoints = convert_raw_to_numpy(dataset_info, raw_data)
@@ -171,6 +171,32 @@ def process(arguments):
         chunk_index)
 
 
+def run(dataset_info, mode):
+    filename_array = get_dataset_filenames(dataset_info, mode,
+                                           args.source_dataset_directory)
+    sorted(filename_array)
+    tmp_filename_array_chunk = list(chunked(filename_array, args.num_chunks))
+    filename_array_chunk = []
+    for chunk_id, filename_array in enumerate(tmp_filename_array_chunk):
+        if not os.path.isfile(
+                os.path.join(args.output_directory, mode, "images",
+                             "{}.npy".format(chunk_id))):
+            filename_array_chunk.append(filename_array)
+        else:
+            print(chunk_id, "exists")
+
+    arguments = []
+    for chunk_index, filename_array in enumerate(filename_array_chunk):
+        arguments.append([
+            chunk_index, filename_array, args.output_directory, mode,
+            dataset_info
+        ])
+
+    p = Pool(args.num_threads)
+    p.map(process, arguments)
+    p.close()
+
+
 def main():
     try:
         os.mkdir(args.output_directory)
@@ -180,38 +206,8 @@ def main():
     dataset_name = args.dataset_name
     dataset_info = map_dataset_info[dataset_name]
 
-    ## train
-    filename_array = get_dataset_filenames(dataset_info, "train",
-                                           args.source_dataset_directory)
-    print(len(filename_array))
-    filename_array_chunk = list(chunked(filename_array, args.num_threads))
-
-    arguments = []
-    for chunk_index, filename_array in enumerate(filename_array_chunk):
-        arguments.append([
-            chunk_index, filename_array, args.output_directory, "train",
-            dataset_info
-        ])
-
-    p = Pool(args.num_threads)
-    p.map(process, arguments)
-    p.close()
-
-    ## test
-    filename_array = get_dataset_filenames(dataset_info, "test",
-                                           args.source_dataset_directory)
-    filename_array_chunk = list(chunked(filename_array, args.num_threads))
-
-    arguments = []
-    for chunk_index, filename_array in enumerate(filename_array_chunk):
-        arguments.append([
-            chunk_index, filename_array, args.output_directory, "test",
-            dataset_info
-        ])
-
-    p = Pool(args.num_threads)
-    p.map(process, arguments)
-    p.close()
+    run(dataset_info, "train")
+    run(dataset_info, "test")
 
 
 if __name__ == "__main__":
@@ -222,7 +218,7 @@ if __name__ == "__main__":
         action="store_true",
         default=False)
     parser.add_argument("--num-threads", "-thread", type=int, default=10)
-    parser.add_argument("--num-chunks", "-chunk", type=int, default=1000)
+    parser.add_argument("--num-chunks", "-chunk", type=int, default=100)
     parser.add_argument(
         "--output-directory", "-out", type=str, default="dataset")
     parser.add_argument(
