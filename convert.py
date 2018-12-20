@@ -3,18 +3,18 @@ A lot of the following code is a rewrite of:
 https://github.com/deepmind/gqn-datasets/data_reader.py	
 https://github.com/l3robot/gqn_datasets_translator	
 """
-
 import argparse
-import time
-import sys
-import os
 import collections
-import torch
 import gzip
-import numpy as np
-import cupy as cp
+import os
+import sys
+import time
+from multiprocessing import Pool
+from more_itertools import chunked
 
+import numpy as np
 import tensorflow as tf
+import torch
 
 DatasetInfo = collections.namedtuple(
     "DatasetInfo",
@@ -96,13 +96,7 @@ def preprocess_cameras(dataset_info, example):
 def get_dataset_filenames(dataset_info, mode, root):
     basepath = dataset_info.basepath
     base = os.path.join(root, basepath, mode)
-    if mode == "train":
-        num_files = dataset_info.train_size
-    else:
-        num_files = dataset_info.test_size
-
     files = sorted(os.listdir(base))
-
     return [os.path.join(base, file) for file in files]
 
 
@@ -130,32 +124,7 @@ def show_frame(image):
     plt.pause(1e-8)
 
 
-def compute_mean_and_variance(np_frames,
-                              total_observations,
-                              dataset_mean=None,
-                              dataset_var=None):
-    subset_size = np_frames.shape[0]
-    new_total_size = total_observations + subset_size
-    co1 = total_observations / new_total_size
-    co2 = subset_size / new_total_size
-
-    frames = cp.asarray(np_frames)
-
-    subset_mean = cp.mean(frames, axis=(0, 1))
-    subset_var = cp.var(frames, axis=(0, 1))
-
-    new_dataset_mean = subset_mean if dataset_mean is None else co1 * dataset_mean + co2 * subset_mean
-    new_dataset_var = subset_var if dataset_var is None else co1 * (
-        dataset_var + dataset_mean**2) + co2 * (
-            subset_var + subset_mean**2) - new_dataset_mean**2
-
-    # avoid negative value
-    new_dataset_var[new_dataset_var < 0] = 0
-
-    return new_dataset_var, new_dataset_mean, cp.sqrt(new_dataset_var)
-
-
-def extract(output_directory, filenames, dataset_info):
+def extract(output_directory, filenames, dataset_info, chunk_index):
     try:
         os.mkdir(output_directory)
     except:
@@ -169,85 +138,72 @@ def extract(output_directory, filenames, dataset_info):
     except:
         pass
 
-    num_observed = 0
-    current_file_number = 1
     frames_array = []
     viewpoints_array = []
-    dataset_mean, dataset_var = None, None
-
-    for filename in filenames:
-        engine = tf.python_io.tf_record_iterator(filename)
+    for tfrecord_filepath in filenames:
+        engine = tf.python_io.tf_record_iterator(tfrecord_filepath)
         for raw_data in engine:
             frames, viewpoints = convert_raw_to_numpy(dataset_info, raw_data)
 
-            if args.with_visualization:
-                show_frame(frames[0, 0])
-
-            # [0, 1] -> [-1, 1]
-            frames = (frames - 0.5) * 2.0
+            # [0, 1] -> [0, 255]
+            frames = np.uint8(frames * 255)
 
             frames_array.append(frames)
             viewpoints_array.append(viewpoints)
-            num_observed += 1
 
-            sys.stdout.write("\r")
-            sys.stdout.write("extracting {} of {} ...".format(
-                len(frames_array), args.num_observations_per_file))
+        frames_array = np.vstack(frames_array)
+        viewpoints_array = np.vstack(viewpoints_array)
 
-            if (len(frames_array) == args.num_observations_per_file):
-                frames_array = np.vstack(frames_array)
-                viewpoints_array = np.vstack(viewpoints_array)
+    filename = "{}.npy".format(chunk_index)
+    np.save(os.path.join(output_directory, "images", filename), frames_array)
+    np.save(
+        os.path.join(output_directory, "viewpoints", filename),
+        viewpoints_array)
+    print(filename, "completed", frames_array.shape)
 
-                dataset_mean, dataset_var, dataset_std = compute_mean_and_variance(
-                    frames_array, num_observed, dataset_mean, dataset_var)
 
-                cp.save(
-                    os.path.join(output_directory, "mean.npy"), dataset_mean)
-                cp.save(os.path.join(output_directory, "std.npy"), dataset_std)
-
-                filename = "{:03d}-of-{}.npy".format(
-                    current_file_number, args.num_observations_per_file)
-                np.save(
-                    os.path.join(output_directory, "images", filename),
-                    frames_array)
-
-                filename = "{:03d}-of-{}.npy".format(
-                    current_file_number, args.num_observations_per_file)
-                np.save(
-                    os.path.join(output_directory, "viewpoints", filename),
-                    viewpoints_array)
-
-                frames_array = []
-                viewpoints_array = []
-
-                sys.stdout.write("\r")
-                print("\033[2K{} of {} completed.".format(
-                    num_observed, args.total_observations))
-
-                if num_observed >= args.total_observations:
-                    return
+def process(arguments):
+    (chunk_index, filename_array, output_directory, mode,
+     dataset_info) = arguments
+    extract(
+        os.path.join(output_directory, "train"), filename_array, dataset_info,
+        chunk_index)
 
 
 def main():
-    assert args.total_observations > args.num_observations_per_file
-
-    dataset_name = args.dataset_name
-    dataset_info = map_dataset_info[dataset_name]
-
     try:
         os.mkdir(args.output_directory)
     except:
         pass
 
+    dataset_name = args.dataset_name
+    dataset_info = map_dataset_info[dataset_name]
+
     ## train
-    filenames = get_dataset_filenames(dataset_info, "train",
-                                      args.source_dataset_directory)
+    filename_array = get_dataset_filenames(dataset_info, "train",
+                                           args.source_dataset_directory)
+    filename_array_chunk = list(chunked(filename_array, args.num_threads))
+
+    arguments = []
+    for chunk_index, filename_array in enumerate(filename_array_chunk):
+        arguments.append([
+            chunk_index, filename_array, args.output_directory, "train",
+            dataset_info
+        ])
+
+    p = Pool(args.num_threads)
+    p.map(process, arguments)
+    p.close()
+
+    exit()
+
     extract(
-        os.path.join(args.output_directory, "train"), filenames, dataset_info)
+        os.path.join(args.output_directory, "train"), filename_array,
+        dataset_info)
 
     ## test
-    filenames = get_dataset_filenames(dataset_info, "test",
-                                      args.source_dataset_directory)
+    filename_array = get_dataset_filenames(dataset_info, "test",
+                                           args.source_dataset_directory)
     extract(
         os.path.join(args.output_directory, "test"), filenames, dataset_info)
 
@@ -259,11 +215,10 @@ if __name__ == "__main__":
         "-visualize",
         action="store_true",
         default=False)
+    parser.add_argument("--num-threads", "-thread", type=int, default=10)
+    parser.add_argument("--num-chunks", "-chunk", type=int, default=1000)
     parser.add_argument(
-        "--total-observations", "-total", type=int, default=2000000)
-    parser.add_argument(
-        "--num-observations-per-file", "-per-file", type=int, default=2000)
-    parser.add_argument("--output-directory", type=str, default="dataset")
+        "--output-directory", "-out", type=str, default="dataset")
     parser.add_argument(
         "--dataset-name", type=str, default="shepard_metzler_7_parts")
     parser.add_argument(
