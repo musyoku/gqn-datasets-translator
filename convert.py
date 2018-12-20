@@ -202,7 +202,6 @@ def main():
     p.map(process, arguments)
     p.close()
 
-
     ## test
     filename_array = get_dataset_filenames(dataset_info, "test",
                                            args.source_dataset_directory)
