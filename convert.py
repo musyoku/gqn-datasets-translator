@@ -6,16 +6,16 @@ https://github.com/l3robot/gqn_datasets_translator
 import argparse
 import collections
 import gzip
+import multiprocessing
 import os
 import sys
 import time
-import multiprocessing
 from multiprocessing import Pool
-from more_itertools import chunked
 
 import numpy as np
 import tensorflow as tf
 import torch
+from more_itertools import chunked
 
 DatasetInfo = collections.namedtuple(
     "DatasetInfo",
@@ -69,13 +69,6 @@ def preprocess_frames(dataset_info, example):
     dataset_image_dimensions = tuple([dataset_info.frame_size] * 2 + [3])
     frames = tf.reshape(
         frames, (-1, dataset_info.sequence_size) + dataset_image_dimensions)
-    if (64 != dataset_info.frame_size):
-        frames = tf.reshape(frames, (-1, ) + dataset_image_dimensions)
-        new_frame_dimensions = (64, ) * 2 + (3, )
-        frames = tf.image.resize_bilinear(
-            frames, new_frame_dimensions[:2], align_corners=True)
-        frames = tf.reshape(
-            frames, (-1, dataset_info.sequence_size) + new_frame_dimensions)
     return frames
 
 
@@ -110,11 +103,8 @@ def convert_raw_to_numpy(dataset_info, raw_data):
             shape=[dataset_info.sequence_size * 5], dtype=tf.float32)
     }
     example = tf.parse_single_example(raw_data, feature_map)
-    frames = preprocess_frames(dataset_info, example)
-    cameras = preprocess_cameras(dataset_info, example)
-    with tf.train.SingularMonitoredSession() as sess:
-        frames = sess.run(frames)
-        cameras = sess.run(cameras)
+    frames = preprocess_frames(dataset_info, example).numpy()
+    cameras = preprocess_cameras(dataset_info, example).numpy()
     return frames, cameras
 
 
@@ -145,6 +135,7 @@ def extract(working_directory, tfrecord_filename, dataset_info):
     frames_npy = None
     viewpoints_npy = None
     engine = tf.python_io.tf_record_iterator(tfrecord_filename)
+    start_time = time.time()
     for raw_data in engine:
         frames, viewpoints = convert_raw_to_numpy(dataset_info, raw_data)
 
@@ -166,7 +157,8 @@ def extract(working_directory, tfrecord_filename, dataset_info):
                     (viewpoints_npy, _viewpoints_npy), axis=0)
             frames_array = []
             viewpoints_array = []
-            print(frames_npy.shape)
+            print(frames_npy.shape, "done in", time.time() - start_time, "sec")
+            start_time = time.time()
 
     filename = os.path.basename(tfrecord_filename).replace(".tfrecord", ".npy")
     np.save(os.path.join(images_path, filename), frames_npy)
@@ -212,6 +204,7 @@ def run(dataset_info, mode):
 
 
 def main():
+    tf.enable_eager_execution()
     try:
         os.mkdir(args.working_directory)
     except:
