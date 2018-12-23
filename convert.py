@@ -5,7 +5,6 @@ https://github.com/l3robot/gqn_datasets_translator
 """
 import argparse
 import collections
-import gzip
 import multiprocessing
 import os
 import sys
@@ -145,27 +144,15 @@ def extract(working_directory, tfrecord_filename, dataset_info):
         frames_array.append(frames)
         viewpoints_array.append(viewpoints)
 
-        if len(frames_array) > 0 and len(frames_array) % 50 == 0:
-            _frames_npy = np.vstack(frames_array)
-            _viewpoints_npy = np.vstack(viewpoints_array)
-            if frames_npy is None:
-                frames_npy = _frames_npy
-                viewpoints_npy = _viewpoints_npy
-            else:
-                frames_npy = np.concatenate((frames_npy, _frames_npy), axis=0)
-                viewpoints_npy = np.concatenate(
-                    (viewpoints_npy, _viewpoints_npy), axis=0)
-            frames_array = []
-            viewpoints_array = []
-            print(frames_npy.shape, "done in", time.time() - start_time, "sec")
-            start_time = time.time()
+    frames_npy = np.vstack(frames_array)
+    viewpoints_npy = np.vstack(viewpoints_array)
 
     filename = os.path.basename(tfrecord_filename).replace(".tfrecord", ".npy")
     np.save(os.path.join(images_path, filename), frames_npy)
     np.save(os.path.join(viewpoints_path, filename), viewpoints_npy)
 
-    print(tfrecord_filename, "completed", frames_npy.shape,
-          viewpoints_npy.shape)
+    print(tfrecord_filename, frames_npy.shape, viewpoints_npy.shape, "done in",
+          time.time() - start_time, "sec")
 
 
 def process(arguments):
@@ -198,9 +185,10 @@ def run(dataset_info, mode):
             p.close()
             arguments = []
 
-    p = Pool(len(arguments))
-    p.map(process, arguments)
-    p.close()
+    if len(arguments) > 0:
+        p = Pool(len(arguments))
+        p.map(process, arguments)
+        p.close()
 
 
 def main():
@@ -219,11 +207,6 @@ def main():
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--with-visualization",
-        "-visualize",
-        action="store_true",
-        default=False)
     parser.add_argument("--num-threads", "-thread", type=int, default=10)
     parser.add_argument("--working-directory", "-out", type=str, default="tmp")
     parser.add_argument(
