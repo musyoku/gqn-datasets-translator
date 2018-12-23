@@ -124,96 +124,82 @@ def show_frame(image):
     plt.pause(1e-8)
 
 
-def extract(working_directory, tfrecord_filename, dataset_info):
-    images_path = os.path.join(working_directory, "images")
-    viewpoints_path = os.path.join(working_directory, "viewpoints")
+def extract(output_directory, filenames, dataset_info, chunk_index):
     try:
-        os.mkdir(working_directory)
+        os.mkdir(output_directory)
     except:
         pass
     try:
-        os.mkdir(images_path)
+        os.mkdir(os.path.join(output_directory, "images"))
     except:
         pass
     try:
-        os.mkdir(viewpoints_path)
+        os.mkdir(os.path.join(output_directory, "viewpoints"))
     except:
         pass
 
     frames_array = []
     viewpoints_array = []
-    frames_npy = None
-    viewpoints_npy = None
-    engine = tf.python_io.tf_record_iterator(tfrecord_filename)
-    for raw_data in engine:
-        frames, viewpoints = convert_raw_to_numpy(dataset_info, raw_data)
+    for file_index, tfrecord_filename in enumerate(filenames):
+        engine = tf.python_io.tf_record_iterator(tfrecord_filename)
+        for raw_data in engine:
+            frames, viewpoints = convert_raw_to_numpy(dataset_info, raw_data)
 
-        # [0, 1] -> [0, 255]
-        frames = np.uint8(frames * 255)
+            # [0, 1] -> [0, 255]
+            frames = np.uint8(frames * 255)
 
-        frames_array.append(frames)
-        viewpoints_array.append(viewpoints)
+            frames_array.append(frames)
+            viewpoints_array.append(viewpoints)
+        print(file_index + 1, "/", len(filenames))
 
-        if len(frames_array) > 0 and len(frames_array) % 50 == 0:
-            _frames_npy = np.vstack(frames_array)
-            _viewpoints_npy = np.vstack(viewpoints_array)
-            if frames_npy is None:
-                frames_npy = _frames_npy
-                viewpoints_npy = _viewpoints_npy
-            else:
-                frames_npy = np.concatenate((frames_npy, _frames_npy), axis=0)
-                viewpoints_npy = np.concatenate(
-                    (viewpoints_npy, _viewpoints_npy), axis=0)
-            frames_array = []
-            viewpoints_array = []
-            print(frames_npy.shape)
+    frames_array = np.vstack(frames_array)
+    viewpoints_array = np.vstack(viewpoints_array)
 
-    filename = os.path.basename(tfrecord_filename).replace(".tfrecord", ".npy")
-    np.save(os.path.join(images_path, filename), frames_npy)
-    np.save(os.path.join(viewpoints_path, filename), viewpoints_npy)
-
-    print(tfrecord_filename, "completed", frames_npy.shape,
-          viewpoints_npy.shape)
+    filename = "{}.npy".format(chunk_index)
+    np.save(os.path.join(output_directory, "images", filename), frames_array)
+    np.save(
+        os.path.join(output_directory, "viewpoints", filename),
+        viewpoints_array)
+    print(filename, "completed", frames_array.shape)
 
 
 def process(arguments):
-    (tfrecord_filename, working_directory, mode, dataset_info) = arguments
+    (chunk_index, filename_array, output_directory, mode,
+     dataset_info) = arguments
     extract(
-        os.path.join(working_directory, mode), tfrecord_filename, dataset_info)
+        os.path.join(output_directory, mode), filename_array, dataset_info,
+        chunk_index)
 
 
 def run(dataset_info, mode):
-    tmp_filename_array = get_dataset_filenames(dataset_info, mode,
-                                               args.source_dataset_directory)
-    filename_array = []
-    for tfrecord_filename in tmp_filename_array:
-        filename = os.path.basename(tfrecord_filename).replace(
-            ".tfrecord", ".npy")
+    filename_array = get_dataset_filenames(dataset_info, mode,
+                                           args.source_dataset_directory)
+    sorted(filename_array)
+    tmp_filename_array_chunk = list(chunked(filename_array, args.num_chunks))
+    filename_array_chunk = []
+    for chunk_id, filename_array in enumerate(tmp_filename_array_chunk):
         if os.path.isfile(
-                os.path.join(args.working_directory, mode, "images",
-                             filename)):
-            print(filename, "skipped")
+                os.path.join(args.output_directory, mode, "images",
+                             "{}.npy".format(chunk_id))):
+            print(chunk_id, "skipped")
         else:
-            filename_array.append(tfrecord_filename)
+            filename_array_chunk.append(filename_array)
 
     arguments = []
-    for tfrecord_filename in filename_array:
-        arguments.append(
-            [tfrecord_filename, args.working_directory, mode, dataset_info])
-        if len(arguments) == args.num_threads:
-            p = Pool(args.num_threads)
-            p.map(process, arguments)
-            p.close()
-            arguments = []
+    for chunk_index, filename_array in enumerate(filename_array_chunk):
+        arguments.append([
+            chunk_index, filename_array, args.output_directory, mode,
+            dataset_info
+        ])
 
-    p = Pool(len(arguments))
+    p = Pool(args.num_threads)
     p.map(process, arguments)
     p.close()
 
 
 def main():
     try:
-        os.mkdir(args.working_directory)
+        os.mkdir(args.output_directory)
     except:
         pass
 
@@ -231,8 +217,10 @@ if __name__ == "__main__":
         "-visualize",
         action="store_true",
         default=False)
-    parser.add_argument("--num-threads", "-thread", type=int, default=10)
-    parser.add_argument("--working-directory", "-out", type=str, default="tmp")
+    parser.add_argument("--num-threads", "-thread", type=int, default=5)
+    parser.add_argument("--num-chunks", "-chunk", type=int, default=1000)
+    parser.add_argument(
+        "--output-directory", "-out", type=str, default="dataset")
     parser.add_argument(
         "--dataset-name", type=str, default="shepard_metzler_7_parts")
     parser.add_argument(
