@@ -68,6 +68,13 @@ def preprocess_frames(dataset_info, example):
     dataset_image_dimensions = tuple([dataset_info.frame_size] * 2 + [3])
     frames = tf.reshape(
         frames, (-1, dataset_info.sequence_size) + dataset_image_dimensions)
+    if dataset_info.frame_size != 64:
+        frames = tf.reshape(frames, (-1, ) + dataset_image_dimensions)
+        new_frame_dimensions = (64, ) * 2 + (3, )
+        frames = tf.image.resize_bilinear(
+            frames, new_frame_dimensions[:2], align_corners=True)
+        frames = tf.reshape(
+            frames, (-1, dataset_info.sequence_size) + new_frame_dimensions)
     return frames
 
 
@@ -162,8 +169,10 @@ def process(arguments):
 
 
 def run(dataset_info, mode):
-    tmp_filename_array = get_dataset_filenames(dataset_info, mode,
-                                               args.source_dataset_directory)
+    base = os.path.join(args.dataset_directory, mode)
+    files = sorted(os.listdir(base))
+    tmp_filename_array = [os.path.join(base, file) for file in files]
+
     filename_array = []
     for tfrecord_filename in tmp_filename_array:
         filename = os.path.basename(tfrecord_filename).replace(
@@ -212,6 +221,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "--dataset-name", type=str, default="shepard_metzler_7_parts")
     parser.add_argument(
-        "--source-dataset-directory", "-source", type=str, default=".")
+        "--dataset-directory",
+        "-dataset",
+        type=str,
+        default="shepard_metzler_7_parts")
     args = parser.parse_args()
     main()
