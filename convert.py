@@ -13,7 +13,6 @@ from multiprocessing import Pool
 
 import numpy as np
 import tensorflow as tf
-import torch
 from more_itertools import chunked
 
 DatasetInfo = collections.namedtuple(
