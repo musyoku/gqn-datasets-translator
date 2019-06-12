@@ -1,5 +1,6 @@
 import os
 import argparse
+import h5py
 import numpy as np
 
 
@@ -8,65 +9,56 @@ def merge(source_directory, target_directory, mode, num_scenes_per_file):
         os.mkdir(os.path.join(args.output_directory, mode))
     except:
         pass
-    try:
-        os.mkdir(os.path.join(args.output_directory, mode, "images"))
-    except:
-        pass
-    try:
-        os.mkdir(os.path.join(args.output_directory, mode, "viewpoints"))
-    except:
-        pass
 
     # Aggregate numbers of scenes.
     num_scenes = 0
-    base_path = os.path.join(source_directory, mode, "images")
+    base_path = os.path.join(source_directory, mode)
     filename_array = os.listdir(base_path)
     for index, filename in enumerate(filename_array):
         filepath = os.path.join(base_path, filename)
-        with open(filepath, "rb") as f:
-            major, minor = np.lib.format.read_magic(f)
-            shape, fortran, dtype = np.lib.format.read_array_header_1_0(f)
-            num_scenes += shape[0]
+        with h5py.File(filepath, "r") as f:
+            images = f["images"].value
+            num_scenes += images.shape[0]
 
     print("#scene", num_scenes)
     assert num_scenes % num_scenes_per_file == 0
 
     output_file_number = 1
 
-    frames_base_path = os.path.join(source_directory, mode, "images")
-    viewpoints_base_path = os.path.join(source_directory, mode, "viewpoints")
-    frames = None
+    images = None
     viewpoints = None
     for index, filename in enumerate(filename_array):
-        _frames = np.load(os.path.join(frames_base_path, filename))
-        _viewpoints = np.load(os.path.join(viewpoints_base_path, filename))
-        if frames is None:
-            frames = _frames
-        else:
-            frames = np.concatenate((frames, _frames), axis=0)
-        if viewpoints is None:
-            viewpoints = _viewpoints
-        else:
-            viewpoints = np.concatenate((viewpoints, _viewpoints), axis=0)
+        with h5py.File(os.path.join(base_path, filename), "r") as f:
+            _images = f["images"].value
+            _viewpoints = f["viewpoints"].value
+            if images is None:
+                images = _images
+            else:
+                images = np.concatenate((images, _images), axis=0)
+            if viewpoints is None:
+                viewpoints = _viewpoints
+            else:
+                viewpoints = np.concatenate((viewpoints, _viewpoints), axis=0)
 
-        while len(frames) > num_scenes_per_file:
-            frames_to_save, frames_rest = frames[:num_scenes_per_file], frames[
-                num_scenes_per_file:]
-            viewpoints_to_save, viewpoints_rest = viewpoints[:num_scenes_per_file], viewpoints[
-                num_scenes_per_file:]
-            np.save(
-                os.path.join(target_directory, mode, "images",
-                             "{:05d}.npy".format(output_file_number)),
-                frames_to_save)
-            np.save(
-                os.path.join(target_directory, mode, "viewpoints",
-                             "{:05d}.npy".format(output_file_number)),
-                viewpoints_to_save)
-            frames = frames_rest
-            viewpoints = viewpoints_rest
-            output_file_number += 1
+            while len(images) > num_scenes_per_file:
+                images_to_save, images_rest = images[:
+                                                     num_scenes_per_file], images[
+                                                         num_scenes_per_file:]
+                viewpoints_to_save, viewpoints_rest = viewpoints[:num_scenes_per_file], viewpoints[
+                    num_scenes_per_file:]
 
-        print(index, "/", len(filename_array), "completed")
+                with h5py.File(
+                        os.path.join(target_directory, mode,
+                                     "{:04d}.h5".format(output_file_number)),
+                        "w") as f:
+                    f.create_dataset("images", data=images_to_save)
+                    f.create_dataset("viewpoints", data=viewpoints_to_save)
+
+                images = images_rest
+                viewpoints = viewpoints_rest
+                output_file_number += 1
+
+            print(index, "/", len(filename_array), "completed")
 
 
 def main():
@@ -84,11 +76,7 @@ def main():
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--num-scenes-per-file", "-ns", type=int, default=1000)
-    parser.add_argument(
-        "--output-directory",
-        "-out",
-        type=str,
-        default="shepard_metzler_7_npy")
+    parser.add_argument("--output-directory", "-out", type=str, required=True)
     parser.add_argument(
         "--source-directory", "-source", type=str, default="tmp")
     args = parser.parse_args()

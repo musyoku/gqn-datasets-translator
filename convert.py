@@ -7,6 +7,7 @@ import argparse
 import collections
 import multiprocessing
 import os
+import h5py
 import sys
 import time
 from multiprocessing import Pool
@@ -119,19 +120,9 @@ def show_frame(image):
     plt.pause(1e-8)
 
 
-def extract(working_directory, tfrecord_filename, dataset_info):
-    images_path = os.path.join(working_directory, "images")
-    viewpoints_path = os.path.join(working_directory, "viewpoints")
+def extract(output_directory, tfrecord_filename, dataset_info):
     try:
-        os.mkdir(working_directory)
-    except:
-        pass
-    try:
-        os.mkdir(images_path)
-    except:
-        pass
-    try:
-        os.mkdir(viewpoints_path)
+        os.mkdir(output_directory)
     except:
         pass
 
@@ -153,9 +144,10 @@ def extract(working_directory, tfrecord_filename, dataset_info):
     frames_npy = np.vstack(frames_array)
     viewpoints_npy = np.vstack(viewpoints_array)
 
-    filename = os.path.basename(tfrecord_filename).replace(".tfrecord", ".npy")
-    np.save(os.path.join(images_path, filename), frames_npy)
-    np.save(os.path.join(viewpoints_path, filename), viewpoints_npy)
+    filename = os.path.basename(tfrecord_filename).replace(".tfrecord", ".h5")
+    with h5py.File(os.path.join(output_directory, filename), "w") as f:
+        f.create_dataset("images", data=frames_npy)
+        f.create_dataset("viewpoints", data=viewpoints_npy)
 
     print(tfrecord_filename, frames_npy.shape, viewpoints_npy.shape, "done in",
           time.time() - start_time, "sec")
@@ -175,10 +167,9 @@ def run(dataset_info, mode):
     filename_array = []
     for tfrecord_filename in tmp_filename_array:
         filename = os.path.basename(tfrecord_filename).replace(
-            ".tfrecord", ".npy")
+            ".tfrecord", ".h5")
         if os.path.isfile(
-                os.path.join(args.working_directory, mode, "images",
-                             filename)):
+                os.path.join(args.working_directory, mode, filename)):
             print(filename, "skipped")
         else:
             filename_array.append(tfrecord_filename)
@@ -223,6 +214,6 @@ if __name__ == "__main__":
         "--dataset-directory",
         "-dataset",
         type=str,
-        default="shepard_metzler_7_parts")
+        default="shepard_metzler_7_parts_tfrecord")
     args = parser.parse_args()
     main()
