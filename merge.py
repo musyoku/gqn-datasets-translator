@@ -17,7 +17,7 @@ def merge(source_directory, target_directory, mode, num_scenes_per_file):
     for index, filename in enumerate(filename_array):
         filepath = os.path.join(base_path, filename)
         with h5py.File(filepath, "r") as f:
-            images = f["images"].value
+            images = f["images"][()]
             num_scenes += images.shape[0]
 
     print("#scene", num_scenes)
@@ -29,8 +29,8 @@ def merge(source_directory, target_directory, mode, num_scenes_per_file):
     viewpoints = None
     for index, filename in enumerate(filename_array):
         with h5py.File(os.path.join(base_path, filename), "r") as f:
-            _images = f["images"].value
-            _viewpoints = f["viewpoints"].value
+            _images = f["images"][()]
+            _viewpoints = f["viewpoints"][()]
             if images is None:
                 images = _images
             else:
